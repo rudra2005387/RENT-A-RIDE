@@ -25,13 +25,14 @@ function SignUp() {
     formState: { errors },
   } = useForm({ resolver: zodResolver(schema) });
 
-  const [isError, setError] = useState(false);
+  const [isError, setError] = useState(null);
   const [isLoading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const onSubmit = async (formData, e) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
@@ -40,15 +41,16 @@ function SignUp() {
       });
       const data = await res.json();
       setLoading(false);
-      if (data.succes === false) {
-        setError(true);
+      
+      if (!res.ok || data.succes === false) {
+        setError(data.message || "Something went wrong");
         return;
       }
-      setError(false);
+      setError(null);
       navigate("/signin");
     } catch (error) {
       setLoading(false);
-      setError(true);
+      setError(error.message || "Something went wrong");
     }
   };
 
@@ -106,7 +108,7 @@ function SignUp() {
 
           <div>
             <input
-              type="text"
+              type="password"
               id="password"
               className="text-black bg-slate-100 p-3 rounded-md w-full"
               placeholder="Password"
@@ -125,16 +127,17 @@ function SignUp() {
           >
             {isLoading ? "Loading ..." : "Register"}
           </button>
-          <div className="flex justify-between">
-            <p className="text-[10px]">
-              Have a account?{" "}
-              <span className="text-blue-600">
-                {" "}
-                <Link to={`/signin`}>Sign in</Link>
+          {isError && (
+            <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-md text-[12px]">
+              {isError}
+            </div>
+          )}
+          <div className="flex justify-center pt-2">
+            <p className="text-[10px] text-center">
+              Already have an account?{" "}
+              <span className="text-blue-600 font-semibold">
+                <Link to={`/signin`}>Sign In</Link>
               </span>
-            </p>
-            <p className="text-[10px] text-red-600">
-              {isError && "something went wrong"}
             </p>
           </div>
         </form>

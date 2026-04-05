@@ -77,6 +77,8 @@ const CheckoutPage = () => {
     dropofftime,
     pickupDate,
     dropoffDate,
+    pickup_location_details,
+    dropoff_location_details,
   } = useSelector((state) => state.bookingDataSlice);
 
   //latest bookings data taken from redux
@@ -135,6 +137,15 @@ const CheckoutPage = () => {
       pickup_district,
       pickup_location,
       dropoff_location,
+      // Include coordinates for distance calculation and trip metrics
+      pickupCoords: pickup_location_details ? {
+        lat: pickup_location_details.lat,
+        lng: pickup_location_details.lng,
+      } : null,
+      dropoffCoords: dropoff_location_details ? {
+        lat: dropoff_location_details.lat,
+        lng: dropoff_location_details.lng,
+      } : null,
     };
 
     try {

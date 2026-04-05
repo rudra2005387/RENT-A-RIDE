@@ -31,11 +31,17 @@ import AllVehiclesofSameModel from "./pages/user/AllVehiclesofSameModel";
 import AddProductModal from "./pages/admin/components/AddProductModal";
 import VendorAddProductModal from "./pages/vendor/Components/VendorAddVehilceModal";
 import CarNotFound from "./pages/user/CarNotFound";
+import BookingConfirmation from "./pages/user/BookingConfirmation";
 
 function App() {
   return (
     <>
-      <BrowserRouter>
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
         {/* <ThemeProvider theme={theme}> */}
         <Routes>
           {/* if user enter wrong url show this page */}
@@ -68,6 +74,7 @@ function App() {
             <Route path="/availableVehicles" element={<AvailableVehicles />} />
             <Route path="/checkoutPage" element={<CheckoutPage />} />
             <Route path="/razorpay" element={<Razorpay />} />
+            <Route path="/booking-confirmation" element={<BookingConfirmation />} />
           </Route>
 
           {/* vendor private routes */}

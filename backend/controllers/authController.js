@@ -8,19 +8,53 @@ const expireDate = new Date(Date.now() + 3600000);
 export const signUp = async (req, res, next) => {
   const { username, email, password } = req.body;
 
-  // i put hashedPassword and newUser in try because if emty value comes the exicution dosenot stop
-
   try {
-    const hashedPassword = bcryptjs.hashSync(password, 10);
+    // Validate required fields
+    if (!username || !email || !password) {
+      return next(errorHandler(400, "All fields are required"));
+    }
+
+    // Trim whitespace
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      return next(errorHandler(400, "Invalid email format"));
+    }
+
+    // Validate password length
+    if (trimmedPassword.length < 6) {
+      return next(errorHandler(400, "Password must be at least 6 characters long"));
+    }
+
+    // Validate username length
+    if (trimmedUsername.length < 3) {
+      return next(errorHandler(400, "Username must be at least 3 characters long"));
+    }
+
+    const hashedPassword = bcryptjs.hashSync(trimmedPassword, 10);
     const newUser = new User({
-      username,
-      email,
+      username: trimmedUsername,
+      email: trimmedEmail,
       password: hashedPassword,
       isUser: true,
     });
     await newUser.save();
-    res.status(200).json({ message: "newUser added successfully" });
+    res.status(201).json({ succes: true, message: "Account created successfully. Please sign in." });
   } catch (error) {
+    // Handle MongoDB duplicate key error
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return next(errorHandler(400, `${field} already exists`));
+    }
+    // Handle MongoDB validation errors
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return next(errorHandler(400, messages.join(", ")));
+    }
     next(error);
   }
 };
@@ -92,66 +126,76 @@ export const refreshToken = async (req, res, next) => {
 
 export const signIn = async (req, res, next) => {
   const { email, password } = req.body;
+  
   try {
-    const validUser = await User.findOne({ email });
-    if (!validUser) return next(errorHandler(404, "user not found"));
-    const validPassword = bcryptjs.compareSync(password, validUser.password);
-    if (!validPassword) return next(errorHandler(401, "wrong credentials"));
+    // Validate required fields
+    if (!email || !password) {
+      return next(errorHandler(400, "Email and password are required"));
+    }
+
+    // Trim and normalize email
+    const trimmedEmail = email.trim().toLowerCase();
+
+    // Find user by email
+    const validUser = await User.findOne({ email: trimmedEmail });
+    if (!validUser) {
+      return next(errorHandler(401, "Invalid email or password"));
+    }
+
+    // Check password
+    let validPassword = false;
+    try {
+      validPassword = bcryptjs.compareSync(password, validUser.password);
+    } catch (bcryptError) {
+      console.error("Bcrypt comparison error:", bcryptError);
+      return next(errorHandler(500, "Authentication process failed"));
+    }
+
+    if (!validPassword) {
+      return next(errorHandler(401, "Invalid email or password"));
+    }
+
+    // Generate tokens
     let accessToken = "";
     let refreshToken = "";
-    accessToken = Jwt.sign({ id: validUser._id }, process.env.ACCESS_TOKEN, {
-      expiresIn: "15m",
-    }); //accessToken expires in 15 minutes
-    refreshToken = Jwt.sign({ id: validUser._id }, process.env.REFRESH_TOKEN, {
-      expiresIn: "7d",
-    }); //refreshToken expires in 7 days
+    
+    try {
+      accessToken = Jwt.sign({ id: validUser._id }, process.env.ACCESS_TOKEN, {
+        expiresIn: "15m",
+      });
+      refreshToken = Jwt.sign({ id: validUser._id }, process.env.REFRESH_TOKEN, {
+        expiresIn: "7d",
+      });
+    } catch (jwtError) {
+      console.error("JWT generation error:", jwtError);
+      return next(errorHandler(500, "Token generation failed. Please try again."));
+    }
 
+    // Update user with refresh token
     const updatedData = await User.findByIdAndUpdate(
       { _id: validUser._id },
       { refreshToken },
       { new: true }
-    ); //store the refresh token in db
+    );
 
-    //separating password from the updatedData
-    const { password: hashedPassword, isAdmin, ...rest } = updatedData._doc;
+    if (!updatedData) {
+      return next(errorHandler(500, "User update failed"));
+    }
 
-    //not sending users hashed password to frontend
+    // Prepare response without password
+    const { password: hashedPassword, ...userWithoutPassword } = updatedData._doc;
+
     const responsePayload = {
-      refreshToken: refreshToken,
+      succes: true,
+      refreshToken,
       accessToken,
-      isAdmin,
-      ...rest,
+      ...userWithoutPassword,
     };
-
-    req.user = {
-      ...rest,
-      isAdmin: validUser.isAdmin,
-      isUser: validUser.isUser,
-    };
-
-    //the code for the cookie
-    // .cookie("access_token", accessToken, {
-    //   httpOnly: true,
-    //   maxAge: 900000,
-    //   sameSite: "None",
-    //   secure: true,
-    //   domain: "rent-a-ride-two.vercel.app"
-    // }) // 15 minutes
-    // .cookie("refresh_token", refreshToken, {
-    //   httpOnly: true,
-    //   maxAge: 604800000,
-    //   sameSite: "None",
-    //   secure: true,
-    //   domain: "rent-a-ride-two.vercel.app"
-    // })
-    // 7 days
 
     res.status(200).json(responsePayload);
-
-    next();
   } catch (error) {
+    console.error("SignIn error:", error);
     next(error);
-    console.log(error);
   }
 };
 

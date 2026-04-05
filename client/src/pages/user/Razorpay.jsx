@@ -112,7 +112,11 @@ export async function displayRazorpay(values, navigate, dispatch) {
           //3. this display razorpay function was called initially from checkoutPage go to there
           await fetchLatestBooking(values.user_id, dispatch);
 
-          navigate("/");
+          // Redirect to BookingConfirmation page instead of home
+          navigate("/booking-confirmation");
+          dispatch(setPageLoading(false));
+        } else {
+          toast.error("Failed to save booking. Please contact support.");
           dispatch(setPageLoading(false));
         }
       },

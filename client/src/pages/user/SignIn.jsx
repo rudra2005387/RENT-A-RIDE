@@ -63,49 +63,50 @@ function SignIn() {
   const dispatch = useDispatch();
 
   const onSubmit = async (formData, e) => {
-    const BASE_URL = import.meta.env.VITE_PRODUCTION_BACKEND_URL;
     e.preventDefault();
     try {
       dispatch(signInStart());
-      const res = await fetch(`${BASE_URL}/api/auth/signin`, {
+      const res = await fetch(`/api/auth/signin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
       const data = await res.json();
       
+      dispatch(loadingEnd());
+      
+      // Check if response was successful
+      if (!res.ok || data.succes === false) {
+        const errorMessage = data.message || "Sign in failed. Please try again.";
+        dispatch(signInFailure(errorMessage));
+        return;
+      }
+
+      // Store tokens in localStorage
       if (data?.accessToken) {
-        localStorage.removeItem(("accessToken"))
+        localStorage.removeItem("accessToken");
         localStorage.setItem("accessToken", data.accessToken);
       }
       if (data?.refreshToken) {
-        localStorage.removeItem(("refreshToken"))
-        localStorage.setItem("refreshToken", data.refreshToken)
+        localStorage.removeItem("refreshToken");
+        localStorage.setItem("refreshToken", data.refreshToken);
       }
 
-      if (data.succes === false || !res.ok) {
-        dispatch(loadingEnd());
-        dispatch(signInFailure(data));
+      // Sign in successful
+      dispatch(signInSuccess(data));
 
-        return;
-      }
+      // Navigate based on user role
       if (data.isAdmin) {
-        dispatch(signInSuccess(data));
-        dispatch(loadingEnd());
         navigate("/adminDashboard");
       } else if (data.isUser) {
-        dispatch(signInSuccess(data));
-        dispatch(loadingEnd());
         navigate("/");
       } else {
-        dispatch(loadingEnd());
-        dispatch(signInFailure(data));
+        dispatch(signInFailure("Invalid user role"));
       }
-      dispatch(loadingEnd());
-      dispatch(signInFailure("something went wrong"));
     } catch (error) {
       dispatch(loadingEnd());
-      dispatch(signInFailure(error));
+      const errorMessage = error.message || "An error occurred. Please try again.";
+      dispatch(signInFailure(errorMessage));
     }
   };
 
@@ -144,7 +145,7 @@ function SignIn() {
 
           <div>
             <input
-              type="text"
+              type="password"
               id="password"
               className="text-black bg-slate-100 p-3 rounded-md w-full"
               placeholder="Password"
@@ -161,23 +162,23 @@ function SignIn() {
             className={`${styles.button}  disabled:bg-slate-500 text-black disabled:text-white`}
             disabled={isLoading}
           >
-            {isLoading ? "Loading ..." : "Login"}
+            {isLoading ? "Signing in..." : "Login"}
           </button>
-          <div className="flex justify-between">
-            <div className="flex justify-between">
-              <p className="text-[10px] border-r border-black">
-                No account?{" "}
-                <span className="text-blue-600 pr-2">
-                  {" "}
-                  <Link to={`/signup`}>Sign Up</Link>
-                </span>
-              </p>
-              <p className="text-[10px] pl-2 text-blue-600">forgot password</p>
+          
+          {isError && (
+            <div className="bg-red-50 border border-red-300 text-red-700 px-4 py-3 rounded-md text-[12px]">
+              {typeof isError === 'string' ? isError : isError?.message || "Something went wrong"}
             </div>
-
-            <p className="text-[10px] text-red-600">
-              {isError ? isError.message || "something went wrong" : " "}
+          )}
+          
+          <div className="flex justify-between items-center pt-2">
+            <p className="text-[10px]">
+              No account?{" "}
+              <span className="text-blue-600 font-semibold">
+                <Link to={`/signup`}>Sign Up</Link>
+              </span>
             </p>
+            <p className="text-[10px] text-blue-600 hover:text-blue-800 cursor-pointer">Forgot password?</p>
           </div>
         </form>
         <div>

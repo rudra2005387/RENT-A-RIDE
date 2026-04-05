@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: mode === "development" ? {
         "/api": {
-          target: env.VITE_PRODUCTION_BACKEND_URL,
+          target: "http://localhost:3000",
           changeOrigin: true,
           secure: false,
           // rewrite: (path) => path.replace(/^\/api/, '')

@@ -5,11 +5,12 @@ import Razorpay from "razorpay";
 import { availableAtDate } from "../../services/checkAvailableVehicle.js";
 import Vehicle from "../../models/vehicleModel.js";
 import nodemailer from "nodemailer";
+import { calculateDistance, estimateDuration, calculateFare } from "../../utils/distanceCalculator.js";
 
 export const BookCar = async (req, res, next) => {
   try {
     if (!req.body) {
-      next(errorHandler(401, "bad request on body"));
+      return next(errorHandler(401, "bad request on body"));
     }
 
     const {
@@ -21,36 +22,91 @@ export const BookCar = async (req, res, next) => {
       pickup_location,
       dropoff_location,
       pickup_district,
+      pickupCoords,
+      dropoffCoords,
       razorpayPaymentId,
       razorpayOrderId,
     } = req.body;
 
+    // Validate required fields
+    if (!user_id || !vehicle_id || !totalPrice || !pickupDate || !dropoffDate) {
+      return next(errorHandler(400, "Missing required fields"));
+    }
+
+    // Validate date range
+    const pickupDateObj = new Date(pickupDate);
+    const dropoffDateObj = new Date(dropoffDate);
+
+    if (pickupDateObj >= dropoffDateObj) {
+      return next(errorHandler(409, "Drop-off date must be after pick-up date"));
+    }
+
+    // Check if vehicle is still available (prevent double-booking)
+    const vehiclesAvailable = await availableAtDate(pickupDate, dropoffDate);
+    const vehicleStillAvailable = vehiclesAvailable.find(
+      (vehicle) => vehicle._id.toString() === vehicle_id
+    );
+
+    if (!vehicleStillAvailable) {
+      return next(
+        errorHandler(
+          409,
+          "Vehicle is no longer available for the selected dates. Please search again."
+        )
+      );
+    }
+
+    // Calculate trip metrics if coordinates are provided
+    let estimatedDistance = 0;
+    let estimatedDuration = 0;
+    let estimatedFare = 0;
+
+    if (
+      pickupCoords &&
+      dropoffCoords &&
+      pickupCoords.lat &&
+      pickupCoords.lng &&
+      dropoffCoords.lat &&
+      dropoffCoords.lng
+    ) {
+      estimatedDistance = calculateDistance(
+        pickupCoords.lat,
+        pickupCoords.lng,
+        dropoffCoords.lat,
+        dropoffCoords.lng
+      );
+      estimatedDuration = estimateDuration(estimatedDistance);
+      estimatedFare = calculateFare(estimatedDistance, estimatedDuration);
+    }
+
     const book = new Booking({
-      pickupDate,
-      dropOffDate: dropoffDate,
+      pickupDate: pickupDateObj,
+      dropOffDate: dropoffDateObj,
       userId: user_id,
-      pickUpLocation: pickup_location,
       vehicleId: vehicle_id,
+      pickUpLocation: pickup_location,
       dropOffLocation: dropoff_location,
-      pickUpDistrict: pickup_district,
+      pickUpCoordinates: pickupCoords,
+      dropOffCoordinates: dropoffCoords,
+      estimatedDistance,
+      estimatedDuration,
+      estimatedFare,
       totalPrice,
       razorpayPaymentId,
       razorpayOrderId,
       status: "booked",
     });
-    if (!book) {
-      console.log("not booked");
-      return;
-    }
 
     const booked = await book.save();
+
     res.status(200).json({
-      message: "car booked successfully",
-      booked,
+      success: true,
+      message: "Car booked successfully",
+      booking: booked,
     });
   } catch (error) {
-    console.log(error);
-    next(errorHandler(500, "error while booking car"));
+    console.error("Booking error:", error);
+    next(errorHandler(500, "Error while booking car"));
   }
 };
 

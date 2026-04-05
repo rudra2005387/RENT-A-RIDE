@@ -4,13 +4,11 @@ import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker";
 import { useEffect, useState } from "react";
-import { useDispatch, useSelector } from "react-redux";
+import { useDispatch } from "react-redux";
 import { Controller, useForm } from "react-hook-form";
-import TextField from "@mui/material/TextField";
-import { MenuItem } from "@mui/material";
 
 //reducers
-import { setAvailableCars, setLocationsOfDistrict, setSelectedDistrict } from "../../redux/user/selectRideSlice";
+import { setAvailableCars } from "../../redux/user/selectRideSlice";
 
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,11 +16,26 @@ import { useNavigate } from "react-router-dom";
 import { setSelectedData } from "../../redux/user/BookingDataSlice";
 import dayjs from "dayjs";
 import useFetchLocationsLov from "../../hooks/useFetchLocationsLov";
+import LocationAutocomplete from "../../components/LocationAutocomplete";
 
 const schema = z.object({
-  dropoff_location: z.string().min(1, { message: "Dropoff location needed" }),
-  pickup_district: z.string().min(1, { message: "Pickup District needed" }),
-  pickup_location: z.string().min(1, { message: "Pickup Location needed" }),
+  dropoff_location: z.object({
+    name: z.string().min(1),
+    lat: z.number(),
+    lng: z.number(),
+    district: z.string(),
+    label: z.string(),
+    value: z.string(),
+  }, { message: "Dropoff location needed" }),
+  
+  pickup_location: z.object({
+    name: z.string().min(1),
+    lat: z.number(),
+    lng: z.number(),
+    district: z.string(),
+    label: z.string(),
+    value: z.string(),
+  }, { message: "Pickup Location needed" }),
 
   pickuptime: z.object({
     $d: z.instanceof(Date).refine((date) => date !== null && date !== undefined, {
@@ -46,7 +59,22 @@ const schema = z.object({
     },
     { message: "drop-off time is required" }
   ),
-});
+}).refine(
+  (data) => {
+    // Validate that dropoff date is after pickup date
+    const pickupDate = data.pickuptime?.$d;
+    const dropoffDate = data.dropofftime?.$d;
+    
+    if (pickupDate && dropoffDate) {
+      return dropoffDate > pickupDate;
+    }
+    return true;
+  },
+  {
+    message: "Drop-off date must be after pick-up date",
+    path: ["dropofftime"],
+  }
+);
 
 const CarSearch = () => {
   const {
@@ -57,59 +85,64 @@ const CarSearch = () => {
   } = useForm({
     resolver: zodResolver(schema),
     defaultValues: {
-      pickup_district: "",
-      pickup_location: "",
-      dropoff_location: "",
+      pickup_location: null,
+      dropoff_location: null,
       pickuptime: null,
       dropofftime: null,
     },
   });
 
   const navigate = useNavigate();
-  const { districtData } = useSelector((state) => state.modelDataSlice);
   const { fetchLov, isLoading } = useFetchLocationsLov();
-  const uniqueDistrict = districtData?.filter((cur, idx) => {
-    return cur !== districtData[idx + 1];
-  });
-  const { selectedDistrict, wholeData, locationsOfDistrict } = useSelector((state) => state.selectRideSlice);
 
   const [pickup, setPickup] = useState(null);
   const [error, setError] = useState(null);
+  const [pickupLocation, setPickupLocation] = useState(null);
+  const [dropoffLocation, setDropoffLocation] = useState(null);
 
   const dispatch = useDispatch();
 
   //useEffect to fetch data from backend for locations
   useEffect(() => {
-    // fetchModelData(dispatch);
     fetchLov();
   }, []);
-
-  //for showing appropriate locations according to districts
-  useEffect(() => {
-    if (selectedDistrict !== null) {
-      const showLocationInDistrict = wholeData
-        .filter((cur) => {
-          return cur.district === selectedDistrict;
-        })
-        .map((cur) => cur.location);
-      dispatch(setLocationsOfDistrict(showLocationInDistrict));
-    }
-  }, [selectedDistrict]);
 
   //search cars
   const hanldeData = async (data) => {
     try {
-      if (data) {
-        //preserving the selected data for later use
-        dispatch(setSelectedData(data));
-
+      if (data && pickupLocation && dropoffLocation) {
         const pickupDate = data.pickuptime.$d;
         const dropOffDate = data.dropofftime.$d;
+        
+        // Additional validation - ensure pickup date is before dropoff date
+        if (pickupDate >= dropOffDate) {
+          setError("Drop-off date and time must be after pick-up date and time");
+          return;
+        }
+        
+        // Preserve the selected data for later use
+        dispatch(setSelectedData({
+          ...data,
+          pickup_location_details: pickupLocation,
+          dropoff_location_details: dropoffLocation,
+        }));
+        
         const datas = {
           pickupDate,
           dropOffDate,
-          pickUpDistrict: data.pickup_district,
-          pickUpLocation: data.pickup_location,
+          pickUpLocation: pickupLocation.name,
+          pickUpDistrict: pickupLocation.district,
+          dropOffLocation: dropoffLocation.name,
+          dropOffDistrict: dropoffLocation.district,
+          // Include coordinates for distance calculation
+          pickupCoords: {
+            lat: pickupLocation.lat,
+            lng: pickupLocation.lng,
+          },
+          dropoffCoords: {
+            lat: dropoffLocation.lat,
+            lng: dropoffLocation.lng,
+          },
         };
 
         const res = await fetch("api/user/showSingleofSameModel", {
@@ -121,8 +154,8 @@ const CarSearch = () => {
         });
 
         if (!res.ok) {
-          const data = await res.json();
-          setError(data.message);
+          const errorData = await res.json();
+          setError(errorData.message || "Error searching for vehicles");
           return;
         }
 
@@ -134,32 +167,24 @@ const CarSearch = () => {
 
         if (res.ok) {
           reset({
-            pickuptime: null, // Reset pickuptime to null
-            dropofftime: null, // Reset dropofftime to null
+            pickuptime: null,
+            dropofftime: null,
+            pickup_location: null,
+            dropoff_location: null,
           });
-
-          const pickupDistrictElement = document.getElementById("pickup_district");
-          const pickupLocationElement = document.getElementById("pickup_location");
-          const dropoffLocationElement = document.getElementById("dropoff_location");
-
-          if (pickupDistrictElement) {
-            pickupDistrictElement.innerHTML = "";
-          }
-          if (pickupLocationElement) {
-            pickupLocationElement.innerHTML = "";
-          }
-          if (dropoffLocationElement) {
-            dropoffLocationElement.innerHTML = "";
-          }
+          setPickupLocation(null);
+          setDropoffLocation(null);
         }
+      } else {
+        setError("Please select both pickup and dropoff locations");
       }
     } catch (error) {
       console.log("Error  : ", error);
+      setError("An error occurred. Please try again.");
     }
   };
 
   //this is to ensure there will be 1 day gap between pickup and dropoff date
-
   const oneDayGap = pickup && pickup.add(1, "day");
 
   return (
@@ -182,116 +207,56 @@ const CarSearch = () => {
 
               <form onSubmit={handleSubmit(hanldeData)}>
                 <div className="box-form">
+                  {/* Pickup Location with Autocomplete */}
                   <div className="box-form__car-type">
-                    <label htmlFor="pickup_district">
-                      <IconMapPinFilled className="input-icon" /> &nbsp; Pick-up District <p className="text-red-500">*</p>
-                    </label>
-                    <Controller
-                      name="pickup_district"
-                      control={control}
-                      render={({ field }) => (
-                        <TextField
-                          {...field}
-                          id="pickup_district"
-                          className="p-2 capitalize"
-                          select
-                          // required
-                          error={Boolean(errors.pickup_district)}
-                          onChange={(e) => {
-                            field.onChange(e.target.value);
-                            dispatch(setSelectedDistrict(e.target.value));
-                          }}
-                        >
-                          {isLoading == true && (
-                            <MenuItem value="">
-                              <span className="animate-pulse">Loading</span> <span className="animate-pulse">...</span>
-                            </MenuItem>
-                          )}
-                          {!isLoading && <MenuItem value="">Select a Place</MenuItem>}
-                          {uniqueDistrict?.map((cur, idx) => (
-                            <MenuItem value={cur} key={idx}>
-                              {cur}
-                            </MenuItem>
-                          ))}
-                        </TextField>
-                      )}
-                    />
-                    {errors.pickup_district && <p className="text-red-500">{errors.pickup_district.message}</p>}
-                  </div>
-
-                  <div className="box-form__car-type ">
-                    <label htmlFor="pickup_location">
+                    <label htmlFor="pickup_location" className="flex items-center">
                       <IconMapPinFilled className="input-icon" /> &nbsp; Pick-up Location <p className="text-red-500">*</p>
                     </label>
                     <Controller
                       name="pickup_location"
                       control={control}
                       render={({ field }) => (
-                        <TextField
-                          {...field}
-                          id="pickup_location"
-                          select
-                          // required
-                          className="md:mb-10 capitalize"
-                          placeholder={"pick up location"}
-                          onChange={(e) => field.onChange(e.target.value)}
+                        <LocationAutocomplete
+                          label="Pickup Location"
+                          placeholder="Search for pickup location..."
+                          value={pickupLocation}
+                          onChange={(location) => {
+                            setPickupLocation(location);
+                            field.onChange(location);
+                          }}
                           error={Boolean(errors.pickup_location)}
-                        >
-                          {isLoading && (
-                            <MenuItem value="">
-                              <span className="animate-pulse">Loading</span> <span className="animate-pulse">...</span>
-                            </MenuItem>
-                          )}
-                          {!isLoading && <MenuItem value="">Select a specific location</MenuItem>}
-                          {/* conditionaly rendering options based on district selected or not */}
-                          {locationsOfDistrict &&
-                            locationsOfDistrict.map((availableLocations, idx) => (
-                              <MenuItem value={availableLocations} key={idx}>
-                                {availableLocations}
-                              </MenuItem>
-                            ))}
-                        </TextField>
+                          helperText={errors.pickup_location?.message}
+                          required
+                          icon={IconMapPinFilled}
+                        />
                       )}
                     />
-                    {errors.pickup_location && <p className="text-red-500">{errors.pickup_location.message}</p>}
                   </div>
 
+                  {/* Dropoff Location with Autocomplete */}
                   <div className="box-form__car-type">
-                    <label>
-                      <IconMapPinFilled className="input-icon" /> &nbsp; Drop-of Location <p className="text-red-500">*</p>
+                    <label htmlFor="dropoff_location" className="flex items-center">
+                      <IconMapPinFilled className="input-icon" /> &nbsp; Drop-off Location <p className="text-red-500">*</p>
                     </label>
-
                     <Controller
                       name="dropoff_location"
                       control={control}
                       render={({ field }) => (
-                        <TextField
-                          {...field}
-                          select
-                          // required
+                        <LocationAutocomplete
+                          label="Dropoff Location"
+                          placeholder="Search for dropoff location..."
+                          value={dropoffLocation}
+                          onChange={(location) => {
+                            setDropoffLocation(location);
+                            field.onChange(location);
+                          }}
                           error={Boolean(errors.dropoff_location)}
-                          id="dropoff_location"
-                          className="md:mb-10 capitalize"
-                          placeholder={"pick up location"}
-                          onChange={(e) => field.onChange(e.target.value)}
-                        >
-                          {isLoading && (
-                            <MenuItem value="">
-                              <span className="animate-pulse">Loading</span> <span className="animate-pulse">...</span>
-                            </MenuItem>
-                          )}
-                          {isLoading && <MenuItem value="">Select a specific location</MenuItem>}
-                          {/* conditionaly rendering options based on district selected or not */}
-                          {locationsOfDistrict &&
-                            locationsOfDistrict.map((availableLocations, idx) => (
-                              <MenuItem value={availableLocations} key={idx}>
-                                {availableLocations}
-                              </MenuItem>
-                            ))}
-                        </TextField>
+                          helperText={errors.dropoff_location?.message}
+                          required
+                          icon={IconMapPinFilled}
+                        />
                       )}
                     />
-                    {errors.dropoff_location && <p className="text-red-500">{errors.dropoff_location.message}</p>}
                   </div>
 
                   <div className="box-form__car-time">
